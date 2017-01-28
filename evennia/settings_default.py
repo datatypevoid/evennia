@@ -119,6 +119,8 @@ LOG_DIR = os.path.join(GAME_DIR, 'server', 'logs')
 SERVER_LOG_FILE = os.path.join(LOG_DIR, 'server.log')
 PORTAL_LOG_FILE = os.path.join(LOG_DIR, 'portal.log')
 HTTP_LOG_FILE = os.path.join(LOG_DIR, 'http_requests.log')
+# if this is set to the empty string, lockwarnings will be turned off.
+LOCKWARNING_LOG_FILE = os.path.join(LOG_DIR, 'lockwarnings.log')
 # Rotate log files when server and/or portal stops. This will keep log
 # file sizes down. Turn off to get ever growing log files and never
 # loose log info.
@@ -694,6 +696,7 @@ try:
     import django_extensions
     INSTALLED_APPS = INSTALLED_APPS + ('django_extensions',)
 except ImportError:
+    # Django extensions are not installed in all distros.
     pass
 
 #######################################################################

@@ -310,7 +310,7 @@ class ServerSession(Session):
                 cchan = ChannelDB.objects.get_channel(cchan[0])
                 cchan.msg("[%s]: %s" % (cchan.key, message))
             except Exception:
-                pass
+                logger.log_trace()
         logger.log_info(message)
 
     def get_client_size(self):
@@ -373,11 +373,25 @@ class ServerSession(Session):
         """
         self.sessionhandler.data_out(self, **kwargs)
 
+    def data_in(self, **kwargs):
+        """
+        Receiving data from the client, sending it off to
+        the respective inputfuncs.
+
+        Kwargs:
+            kwargs (any): Incoming data from protocol on
+                the form `{"commandname": ((args), {kwargs}),...}`
+        Notes:
+            This method is here in order to give the user
+            a single place to catch and possibly process all incoming data from
+            the client. It should usually always end by sending
+            this data off to `self.sessionhandler.call_inputfuncs(self, **kwargs)`.
+        """
+        self.sessionhandler.call_inputfuncs(self, **kwargs)
+
     def msg(self, text=None, **kwargs):
         """
-        Wrapper to mimic msg() functionality of Objects and Players
-        (server sessions don't use data_in since incoming data is
-        handled by inputfuncs).
+        Wrapper to mimic msg() functionality of Objects and Players.
 
         Args:
             text (str): String input.
@@ -419,7 +433,10 @@ class ServerSession(Session):
 
     def __eq__(self, other):
         "Handle session comparisons"
-        return self.address == other.address
+        try:
+            return self.address == other.address
+        except AttributeError:
+            return False
 
     def __str__(self):
         """

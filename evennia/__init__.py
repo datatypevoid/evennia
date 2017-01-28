@@ -52,6 +52,7 @@ search_object = None
 search_script = None
 search_player = None
 search_channel = None
+search_message = None
 search_help = None
 search_tag = None
 
@@ -73,6 +74,10 @@ ansi = None
 spawn = None
 managers = None
 contrib = None
+EvMenu = None
+EvTable = None
+EvForm = None
+EvEditor = None
 
 # Handlers
 SESSION_HANDLER = None
@@ -98,6 +103,7 @@ def _create_version():
     try:
         version = "%s (rev %s)" % (version, check_output("git rev-parse --short HEAD", shell=True, cwd=root, stderr=STDOUT).strip())
     except (IOError, CalledProcessError):
+        # ignore if we cannot get to git
         pass
     return version
 
@@ -150,6 +156,7 @@ def _init():
     from .utils.search import search_object
     from .utils.search import search_script
     from .utils.search import search_player
+    from .utils.search import search_message
     from .utils.search import search_channel
     from .utils.search import search_help
     from .utils.search import search_tag
@@ -170,6 +177,10 @@ def _init():
     from .utils import ansi
     from .utils.spawner import spawn
     from . import contrib
+    from .utils.evmenu import EvMenu
+    from .utils.evtable import EvTable
+    from .utils.evform import EvForm
+    from .utils.eveditor import EvEditor
 
     # handlers
     from .scripts.tickerhandler import TICKER_HANDLER

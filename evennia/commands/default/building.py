@@ -1240,7 +1240,8 @@ class CmdOpen(ObjManipCommand):
                 if old_destination.id != destination.id:
                     # reroute the old exit.
                     exit_obj.destination = destination
-                    [exit_obj.aliases.add(alias) for alias in exit_aliases]
+                    if exit_aliases:
+                        [exit_obj.aliases.add(alias) for alias in exit_aliases]
                     string += " Rerouted its old destination '%s' to '%s' and changed aliases." % \
                         (old_destination.name, destination.name)
                 else:
@@ -1258,9 +1259,10 @@ class CmdOpen(ObjManipCommand):
             if exit_obj:
                 # storing a destination is what makes it an exit!
                 exit_obj.destination = destination
-                string = "Created new Exit '%s' from %s to %s (aliases: %s)." % (exit_name,location.name,
-                                                                                 destination.name,
-                                                                                 ", ".join([str(e) for e in exit_aliases]))
+                string = "" if not exit_aliases else " (aliases: %s)" % (
+                    ", ".join([str(e) for e in exit_aliases]))
+                string = "Created new Exit '%s' from %s to %s%s." % (
+                    exit_name, location.name, destination.name, string)
             else:
                 string = "Error: Exit '%s' not created." % (exit_name)
         # emit results
@@ -1353,10 +1355,12 @@ def _convert_from_string(cmd, strobj):
         try:
             return int(obj)
         except ValueError:
+            # obj cannot be converted to int - that's fine
             pass
         try:
             return float(obj)
         except ValueError:
+            # obj cannot be converted to float - that's fine
             pass
         # iterables
         if obj.startswith('[') and obj.endswith(']'):
@@ -1818,6 +1822,11 @@ class CmdLock(ObjManipCommand):
                 ok = obj.locks.add(lockdef)
             except LockException as e:
                 caller.msg(str(e))
+            if "cmd" in lockdef.lower() and \
+                    inherits_from(obj, "evennia.objects.objects.DefaultExit"):
+                # special fix to update Exits since "cmd"-type locks won't
+                # update on them unless their cmdsets are rebuilt.
+                obj.at_init()
             if ok:
                 caller.msg("Added lock '%s' to %s." % (lockdef, obj))
             return
@@ -1912,6 +1921,8 @@ class CmdExamine(ObjManipCommand):
         if hasattr(obj, "sessions") and obj.sessions.all():
             string += "\n|wSession id(s)|n: %s" % (", ".join("#%i" % sess.sessid
                                                 for sess in obj.sessions.all()))
+        if hasattr(obj, "email") and obj.email:
+            string += "\n|wEmail|n: |c%s|n" % obj.email
         if hasattr(obj, "has_player") and obj.has_player:
             string += "\n|wPlayer|n: |c%s|n" % obj.player.name
             perms = obj.player.permissions.all()
@@ -1936,7 +1947,7 @@ class CmdExamine(ObjManipCommand):
         if perms:
             perms_string = (", ".join(perms))
         else:
-            perms_string = "Default"
+            perms_string = "<None>"
         if obj.is_superuser:
             perms_string += " [Superuser]"
 
@@ -1974,6 +1985,7 @@ class CmdExamine(ObjManipCommand):
                     # we have to protect this since many objects don't have sessions.
                     all_cmdsets.extend([(cmdset.key, cmdset) for cmdset in obj.get_session(obj.sessions.get()).cmdset.all()])
                 except (TypeError, AttributeError):
+                    # an error means we are merging an object without a session
                     pass
             all_cmdsets = [cmdset for cmdset in dict(all_cmdsets).values()]
             all_cmdsets.sort(key=lambda x: x.priority, reverse=True)
@@ -1995,9 +2007,10 @@ class CmdExamine(ObjManipCommand):
         string += self.format_attributes(obj)
 
         # display Tags
-        tags_string = utils.fill(", ".join(tag for tag in obj.tags.all()), indent=5)
+        tags_string = utils.fill(", ".join("%s[%s]" % (tag, category)
+            for tag, category in obj.tags.all(return_key_and_category=True)), indent=5)
         if tags_string:
-            string += "\n|wTags|n: %s" % tags_string
+            string += "\n|wTags[category]|n: %s" % tags_string.strip()
 
         # add the contents
         exits = []

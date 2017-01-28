@@ -605,6 +605,8 @@ class EvEditor(object):
     def __init__(self, caller, loadfunc=None, savefunc=None,
                  quitfunc=None, key="", persistent=False):
         """
+        Launches a full in-game line editor, mimicking the functionality of VIM.
+
         Args:
             caller (Object): Who is using the editor.
             loadfunc (callable, optional): This will be called as
@@ -651,7 +653,7 @@ class EvEditor(object):
         if savefunc:
             self._savefunc = savefunc
         else:
-            self._savefunc = lambda caller: caller.msg(_ERROR_NO_SAVEFUNC)
+            self._savefunc = lambda caller, buffer: caller.msg(_ERROR_NO_SAVEFUNC)
         if quitfunc:
             self._quitfunc = quitfunc
         else:
@@ -807,7 +809,7 @@ class EvEditor(object):
                 formatting information.
 
         """
-        if buf == None:
+        if buf is None:
             buf = self._buffer
         if is_iter(buf):
             buf = "\n".join(buf)

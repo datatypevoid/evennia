@@ -327,13 +327,11 @@ class ServerSessionHandler(SessionHandler):
             self[sessid] = sess
             sess.at_sync()
 
-        # after sync is complete we force-validate all scripts
-        # (this also starts them)
-        init_mode = _ServerConfig.objects.conf("server_restart_mode", default=None)
-        _ScriptDB.objects.validate(init_mode=init_mode)
-        _ServerConfig.objects.conf("server_restart_mode", delete=True)
+        # tell the server hook we synced
+        self.server.at_post_portal_sync()
         # announce the reconnection
         self.announce_all(_(" ... Server restarted."))
+
 
     def portal_disconnect(self, session):
         """
@@ -691,7 +689,22 @@ class ServerSessionHandler(SessionHandler):
 
     def data_in(self, session, **kwargs):
         """
-        Data Portal -> Server.
+        We let the data take a "detour" to session.data_in
+        so the user can override and see it all in one place.
+        That method is responsible to in turn always call
+        this class' `sessionhandler.call_inputfunc` with the
+        (possibly processed) data.
+
+        """
+        if session:
+            session.data_in(**kwargs)
+
+    def call_inputfuncs(self, session, **kwargs):
+        """
+        Split incoming data into its inputfunc counterparts.
+        This should be called by the serversession.data_in
+        as sessionhandler.call_inputfunc(self, **kwargs).
+
         We also intercept OOB communication here.
 
         Args:

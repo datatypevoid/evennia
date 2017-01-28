@@ -382,7 +382,7 @@ class DefaultPlayer(with_metaclass(TypeclassBase, PlayerDB)):
         self.attributes.clear()
         self.nicks.clear()
         self.aliases.clear()
-        super(PlayerDB, self).delete(*args, **kwargs)
+        super(DefaultPlayer, self).delete(*args, **kwargs)
     ## methods inherited from database model
 
     def msg(self, text=None, from_obj=None, session=None, options=None, **kwargs):
@@ -409,12 +409,14 @@ class DefaultPlayer(with_metaclass(TypeclassBase, PlayerDB)):
             try:
                 from_obj.at_msg_send(text=text, to_obj=self, **kwargs)
             except Exception:
+                # this may not be assigned.
                 pass
         try:
             if not self.at_msg_receive(text=text, **kwargs):
                 # abort message to this player
                 return
         except Exception:
+            # this may not be assigned.
             pass
 
         kwargs["options"] = options
@@ -724,6 +726,10 @@ class DefaultPlayer(with_metaclass(TypeclassBase, PlayerDB)):
         protocol_flags = self.attributes.get("_saved_protocol_flags", None)
         if session and protocol_flags:
             session.update_flags(**protocol_flags)
+
+        # inform the client that we logged in through an OOB message
+        if session:
+            session.msg(logged_in={})
 
         self._send_to_connect_channel("|G%s connected|n" % self.key)
         if _MULTISESSION_MODE == 0:
