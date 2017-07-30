@@ -20,6 +20,7 @@ from mock import Mock
 from evennia.commands.default.cmdset_character import CharacterCmdSet
 from evennia.utils.test_resources import EvenniaTest
 from evennia.commands.default import help, general, system, admin, player, building, batchprocess, comms
+from evennia.commands.command import Command, InterruptCommand
 from evennia.utils import ansi, utils
 from evennia.server.sessionhandler import SESSIONS
 
@@ -38,7 +39,7 @@ class CommandTest(EvenniaTest):
     Tests a command
     """
 
-    def call(self, cmdobj, args, msg=None, cmdset=None, noansi=True, caller=None, receiver=None, cmdstring=None):
+    def call(self, cmdobj, args, msg=None, cmdset=None, noansi=True, caller=None, receiver=None, cmdstring=None, obj=None):
         """
         Test a command by assigning all the needed
         properties to cmdobj and  running
@@ -48,6 +49,10 @@ class CommandTest(EvenniaTest):
             cmdobj.at_post_cmd()
         The msgreturn value is compared to eventual
         output sent to caller.msg in the game
+
+        Returns:
+            msg (str): The received message that was sent to the caller.
+
         """
         caller = caller if caller else self.char1
         receiver = receiver if receiver else caller
@@ -58,29 +63,39 @@ class CommandTest(EvenniaTest):
         cmdobj.session = SESSIONS.session_from_sessid(1)
         cmdobj.player = self.player
         cmdobj.raw_string = cmdobj.key + " " + args
-        cmdobj.obj = caller if caller else self.char1
+        cmdobj.obj = obj or (caller if caller else self.char1)
         # test
         old_msg = receiver.msg
+        returned_msg = ""
         try:
             receiver.msg = Mock()
             cmdobj.at_pre_cmd()
             cmdobj.parse()
             cmdobj.func()
             cmdobj.at_post_cmd()
+        except InterruptCommand:
+            pass
+        finally:
             # clean out prettytable sugar. We only operate on text-type
             stored_msg = [args[0] if args and args[0] else kwargs.get("text",utils.to_str(kwargs, force_string=True))
                     for name, args, kwargs in receiver.msg.mock_calls]
-            returned_msg = "||".join(_RE.sub("", mess) for mess in stored_msg)
-            returned_msg = ansi.parse_ansi(returned_msg, strip_ansi=noansi).strip()
+            # Get the first element of a tuple if msg received a tuple instead of a string
+            stored_msg = [smsg[0] if isinstance(smsg, tuple) else smsg for smsg in stored_msg]
             if msg is not None:
+                returned_msg = "||".join(_RE.sub("", mess) for mess in stored_msg)
+                returned_msg = ansi.parse_ansi(returned_msg, strip_ansi=noansi).strip()
                 if msg == "" and returned_msg or not returned_msg.startswith(msg.strip()):
                     sep1 = "\n" + "="*30 + "Wanted message" + "="*34 + "\n"
                     sep2 = "\n" + "="*30 + "Returned message" + "="*32 + "\n"
                     sep3 = "\n" + "="*78
                     retval = sep1 + msg.strip() + sep2 + returned_msg + sep3
                     raise AssertionError(retval)
-        finally:
+            else:
+                returned_msg = "\n".join(str(msg) for msg in stored_msg)
+                returned_msg = ansi.parse_ansi(returned_msg, strip_ansi=noansi).strip()
             receiver.msg = old_msg
+
+        return returned_msg
 
 # ------------------------------------------------------------
 # Individual module Tests
@@ -114,6 +129,9 @@ class TestGeneral(CommandTest):
 
     def test_say(self):
         self.call(general.CmdSay(), "Testing", "You say, \"Testing\"")
+
+    def test_whisper(self):
+        self.call(general.CmdWhisper(), "Obj = Testing", "You whisper to Obj, \"Testing\"")
 
     def test_access(self):
         self.call(general.CmdAccess(), "", "Permission Hierarchy (climbing):")
@@ -311,3 +329,19 @@ class TestBatchProcess(CommandTest):
         self.call(batchprocess.CmdBatchCommands(), "example_batch_cmds", "Running Batchcommand processor  Automatic mode for example_batch_cmds")
         # we make sure to delete the button again here to stop the running reactor
         self.call(building.CmdDestroy(), "button", "button was destroyed.")
+
+class CmdInterrupt(Command):
+
+    key = "interrupt"
+
+    def parse(self):
+        raise InterruptCommand
+
+    def func(self):
+        self.msg("in func")
+
+
+class TestInterruptCommand(CommandTest):
+    def test_interrupt_command(self):
+        ret = self.call(CmdInterrupt(), "")
+        self.assertEqual(ret, "")

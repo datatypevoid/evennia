@@ -32,13 +32,14 @@ from evennia.server.webserver import EvenniaReverseProxyResource
 PORTAL_SERVICES_PLUGIN_MODULES = [mod_import(module) for module in make_iter(settings.PORTAL_SERVICES_PLUGIN_MODULES)]
 LOCKDOWN_MODE = settings.LOCKDOWN_MODE
 
+PORTAL_PIDFILE = ""
 if os.name == 'nt':
     # For Windows we need to handle pid files manually.
     PORTAL_PIDFILE = os.path.join(settings.GAME_DIR, "server", 'portal.pid')
 
-#------------------------------------------------------------
+# -------------------------------------------------------------
 # Evennia Portal settings
-#------------------------------------------------------------
+# -------------------------------------------------------------
 
 VERSION = get_evennia_version()
 
@@ -75,6 +76,8 @@ AMP_ENABLED = AMP_HOST and AMP_PORT and AMP_INTERFACE
 # Maintenance function - this is called repeatedly by the portal.
 
 _IDLE_TIMEOUT = settings.IDLE_TIMEOUT
+
+
 def _portal_maintenance():
     """
     The maintenance function handles repeated checks and updates that
@@ -93,12 +96,12 @@ def _portal_maintenance():
 if _IDLE_TIMEOUT > 0:
     # only start the maintenance task if we care about idling.
     _maintenance_task = LoopingCall(_portal_maintenance)
-    _maintenance_task.start(60) # called every minute
+    _maintenance_task.start(60)  # called every minute
 
 
-#------------------------------------------------------------
+# -------------------------------------------------------------
 # Portal Service object
-#------------------------------------------------------------
+# -------------------------------------------------------------
 class Portal(object):
 
     """
@@ -179,11 +182,11 @@ class Portal(object):
             self.shutdown_complete = True
             reactor.callLater(0, reactor.stop)
 
-#------------------------------------------------------------
+# -------------------------------------------------------------
 #
 # Start the Portal proxy server and add all active services
 #
-#------------------------------------------------------------
+# -------------------------------------------------------------
 
 # twistd requires us to define the variable 'application' so it knows
 # what to execute from.
@@ -291,6 +294,7 @@ if SSH_ENABLED:
 
 
 if WEBSERVER_ENABLED:
+    from evennia.server.webserver import Website
 
     # Start a reverse proxy to relay data to the Server-side webserver
 
@@ -334,7 +338,7 @@ if WEBSERVER_ENABLED:
                     websocket_started = True
                     webclientstr = "\n   + webclient%s" % pstring
 
-            web_root = server.Site(web_root, logPath=settings.HTTP_LOG_FILE)
+            web_root = Website(web_root, logPath=settings.HTTP_LOG_FILE)
             proxy_service = internet.TCPServer(proxyport,
                                                web_root,
                                                interface=interface)
@@ -350,7 +354,6 @@ for plugin_module in PORTAL_SERVICES_PLUGIN_MODULES:
 print('-' * 50)  # end of terminal output
 
 if os.name == 'nt':
-    factory.noisy = False
     # Windows only: Set PID file manually
     with open(PORTAL_PIDFILE, 'w') as f:
         f.write(str(os.getpid()))

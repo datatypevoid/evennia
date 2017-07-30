@@ -125,6 +125,10 @@ LOCKWARNING_LOG_FILE = os.path.join(LOG_DIR, 'lockwarnings.log')
 # file sizes down. Turn off to get ever growing log files and never
 # loose log info.
 CYCLE_LOGFILES = True
+# Number of lines to append to rotating channel logs when they rotate
+CHANNEL_LOG_NUM_TAIL_LINES = 20
+# Max size of channel log files before they rotate
+CHANNEL_LOG_ROTATE_SIZE = 1000000
 # Local time zone for this installation. All choices can be found here:
 # http://www.postgresql.org/docs/8.0/interactive/datetime-keywords.html#DATETIME-TIMEZONE-SET-TABLE
 TIME_ZONE = 'UTC'
@@ -140,7 +144,7 @@ LANGUAGE_CODE = 'en-us'
 # out. This can be set as big as desired. A user may avoid being
 # thrown off by sending the empty system command 'idle' to the server
 # at regular intervals. Set <=0 to deactivate idle timeout completely.
-IDLE_TIMEOUT = 3600
+IDLE_TIMEOUT = -1
 # The idle command can be sent to keep your session active without actually
 # having to spam normal commands regularly. It gives no feedback, only updates
 # the idle timer. Note that "idle" will *always* work, even if a different
@@ -224,7 +228,7 @@ IN_GAME_ERRORS = True
 # ENGINE - path to the the database backend. Possible choices are:
 #            'django.db.backends.sqlite3', (default)
 #            'django.db.backends.mysql',
-#            'django.db.backends.'postgresql_psycopg2',
+#            'django.db.backends.postgresql_psycopg2',
 #            'django.db.backends.oracle' (untested).
 # NAME - database name, or path to the db file for sqlite3
 # USER - db admin (unused in sqlite3)
@@ -319,6 +323,11 @@ PROTOTYPE_MODULES = ["world.prototypes"]
 # Module holding settings/actions for the dummyrunner program (see the
 # dummyrunner for more information)
 DUMMYRUNNER_SETTINGS_MODULE = "evennia.server.profiling.dummyrunner_settings"
+# Mapping to extend Evennia's normal ANSI color tags. The mapping is a list of
+# tuples mapping the tag to the ANSI convertion, like `("%c%r", ansi.ANSI_RED)`
+# (the evennia.utils.ansi module contains all ANSI escape sequences). This is
+# mainly supplied for support of legacy codebase tag formats.
+COLOR_ANSI_EXTRA_MAP = []
 
 ######################################################################
 # Default command sets
@@ -342,6 +351,21 @@ CMDSET_PATHS = ["commands", "evennia", "contribs"]
 # Parent class for all default commands. Changing this class will
 # modify all default commands, so do so carefully.
 COMMAND_DEFAULT_CLASS = "evennia.commands.default.muxcommand.MuxCommand"
+# Command.arg_regex is a regular expression desribing how the arguments
+# to the command must be structured for the command to match a given user
+# input. By default there is no restriction as long as the input string
+# starts with the command name.
+COMMAND_DEFAULT_ARG_REGEX = None
+# By default, Command.msg will only send data to the Session calling
+# the Command in the first place. If set, Command.msg will instead return
+# data to all Sessions connected to the Player/Character associated with
+# calling the Command. This may be more intuitive for users in certain
+# multisession modes.
+COMMAND_DEFAULT_MSG_ALL_SESSIONS = False
+# The help category of a command if not otherwise specified.
+COMMAND_DEFAULT_HELP_CATEGORY = "general"
+# The default lockstring of a command.
+COMMAND_DEFAULT_LOCKS = ""
 # The Channel Handler will create a command to represent each channel,
 # creating it with the key of the channel, its aliases, locks etc. The
 # default class logs channel messages to a file and allows for /history.
@@ -413,13 +437,11 @@ BASE_BATCHPROCESS_PATHS = ['world', 'evennia.contrib', 'evennia.contrib.tutorial
 # The time factor dictates if the game world runs faster (timefactor>1)
 # or slower (timefactor<1) than the real world.
 TIME_FACTOR = 2.0
-# These measures might or might not make sense to your game world.
-TIME_SEC_PER_MIN = 60
-TIME_MIN_PER_HOUR = 60
-TIME_HOUR_PER_DAY = 24
-TIME_DAY_PER_WEEK = 7
-TIME_WEEK_PER_MONTH = 4
-TIME_MONTH_PER_YEAR = 12
+# The starting point of your game time (the epoch), in seconds.
+# In Python a value of 0 means Jan 1 1970 (use negatives for earlier
+# start date). This will affect the returns from the utils.gametime
+# module.
+TIME_GAME_EPOCH = None
 
 ######################################################################
 # Inlinefunc
@@ -479,7 +501,8 @@ CLIENT_DEFAULT_HEIGHT = 45 # telnet standard is 24 but does anyone use such
 # Guest accounts
 ######################################################################
 
-# This enables guest logins, by default via "connect guest"
+# This enables guest logins, by default via "connect guest". Note that
+# you need to edit your login screen to inform about this possibility.
 GUEST_ENABLED = False
 # Typeclass for guest player objects (linked to a character)
 BASE_GUEST_TYPECLASS = "typeclasses.players.Guest"
@@ -521,6 +544,9 @@ DEFAULT_CHANNELS = [
                    "desc": "Connection log",
                    "locks": "control:perm(Immortals);listen:perm(Wizards);send:false()"}
                   ]
+# Extra optional channel for receiving connection messages ("<player> has (dis)connected").
+# While the MudInfo channel will also receieve this, this channel is meant for non-staffers.
+CHANNEL_CONNECTINFO = None
 
 ######################################################################
 # External Channel connections
@@ -619,6 +645,17 @@ STATICFILES_IGNORE_PATTERNS = ('README.md',)
 # directory names shown in the templates directory.
 WEBSITE_TEMPLATE = 'website'
 WEBCLIENT_TEMPLATE = 'webclient'
+# The default options used by the webclient
+WEBCLIENT_OPTIONS = {
+        "gagprompt": True, # Gags prompt from the output window and keep them
+                           # together with the input bar
+        "helppopup": True, # Shows help files in a new popup window
+        "notification_popup": False, # Shows notifications of new messages as
+                                     # popup windows
+        "notification_sound": False # Plays a sound for notifications of new
+                                    # messages
+    }
+
 # We setup the location of the website template as well as the admin site.
 TEMPLATES = [{
         'BACKEND': 'django.template.backends.django.DjangoTemplates',

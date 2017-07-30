@@ -46,6 +46,7 @@ Command = None
 CmdSet = None
 default_cmds = None
 syscmdkeys = None
+InterruptCommand = None
 
 # search functions
 search_object = None
@@ -116,17 +117,10 @@ def _init():
     Evennia has fully initialized all its models. It sets up the API
     in a safe environment where all models are available already.
     """
-    def imp(path, variable=True):
-        "Helper function"
-        mod, fromlist = path, "None"
-        if variable:
-            mod, fromlist = path.rsplit('.', 1)
-        return __import__(mod, fromlist=[fromlist])
-
     global DefaultPlayer, DefaultObject, DefaultGuest, DefaultCharacter
     global DefaultRoom, DefaultExit, DefaultChannel, DefaultScript
     global ObjectDB, PlayerDB, ScriptDB, ChannelDB, Msg
-    global Command, CmdSet, default_cmds, syscmdkeys
+    global Command, CmdSet, default_cmds, syscmdkeys, InterruptCommand
     global search_object, search_script, search_player, search_channel, search_help, search_tag
     global create_object, create_script, create_player, create_channel, create_message, create_help_entry
     global settings,lockfuncs, logger, utils, gametime, ansi, spawn, managers
@@ -149,7 +143,7 @@ def _init():
     from .comms.models import Msg
 
     # commands
-    from .commands.command import Command
+    from .commands.command import Command, InterruptCommand
     from .commands.cmdset import CmdSet
 
     # search functions
@@ -263,9 +257,9 @@ def _init():
 
         def __init__(self):
             "populate the object with commands"
-
             def add_cmds(module):
                 "helper method for populating this object with cmds"
+                from evennia.utils import utils
                 cmdlist = utils.variable_from_module(module, module.__all__)
                 self.__dict__.update(dict([(c.__name__, c) for c in cmdlist]))
 

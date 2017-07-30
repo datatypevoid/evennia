@@ -22,7 +22,7 @@ from os.path import join as osjoin
 from importlib import import_module
 from inspect import ismodule, trace, getmembers, getmodule
 from collections import defaultdict, OrderedDict
-from twisted.internet import threads, defer, reactor
+from twisted.internet import threads, reactor, task
 from django.conf import settings
 from django.utils import timezone
 from django.utils.translation import ugettext as _
@@ -44,6 +44,7 @@ _DA = object.__delattr__
 
 _DEFAULT_WIDTH = settings.CLIENT_DEFAULT_WIDTH
 
+
 def is_iter(iterable):
     """
     Checks if an object behaves iterably.
@@ -61,6 +62,7 @@ def is_iter(iterable):
 
     """
     return hasattr(iterable, '__iter__')
+
 
 def make_iter(obj):
     """
@@ -201,7 +203,7 @@ def justify(text, width=_DEFAULT_WIDTH, align="f", indent=0):
         distribute odd spaces randomly to one of the gaps.
         """
         line_rest = width - (wlen + ngaps)
-        gap = " " # minimum gap between words
+        gap = " "  # minimum gap between words
         if line_rest > 0:
             if align == 'l':
                 line[-1] += " " * line_rest
@@ -211,7 +213,7 @@ def justify(text, width=_DEFAULT_WIDTH, align="f", indent=0):
                 pad = " " * (line_rest // 2)
                 line[0] = pad + line[0]
                 line[-1] = line[-1] + pad + " " * (line_rest % 2)
-            else: # align 'f'
+            else:  # align 'f'
                 gap += " " * (line_rest // max(1, ngaps))
                 rest_gap = line_rest % max(1, ngaps)
                 for i in range(rest_gap):
@@ -250,8 +252,7 @@ def justify(text, width=_DEFAULT_WIDTH, align="f", indent=0):
                 wlen += word[1]
                 ngaps += 1
 
-
-    if line: # catch any line left behind
+    if line:  # catch any line left behind
         lines.append(_process_line(line))
     indentstring = " " * indent
     return "\n".join([indentstring + line for line in lines])
@@ -344,6 +345,9 @@ def time_format(seconds, style=0):
             1. "1d"
             2. "1 day, 8 hours, 30 minutes"
             3. "1 day, 8 hours, 30 minutes, 10 seconds"
+            4. highest unit (like "3 years" or "8 months" or "1 second")
+    Returns:
+        timeformatted (str): A pretty time string.
     """
     if seconds < 0:
         seconds = 0
@@ -358,7 +362,8 @@ def time_format(seconds, style=0):
     minutes = seconds // 60
     seconds -= minutes * 60
 
-    if style is 0:
+    retval = ""
+    if style == 0:
         """
         Standard colon-style output.
         """
@@ -368,7 +373,7 @@ def time_format(seconds, style=0):
             retval = '%02i:%02i' % (hours, minutes,)
         return retval
 
-    elif style is 1:
+    elif style == 1:
         """
         Simple, abbreviated form that only shows the highest time amount.
         """
@@ -380,7 +385,7 @@ def time_format(seconds, style=0):
             return '%im' % (minutes,)
         else:
             return '%is' % (seconds,)
-    elif style is 2:
+    elif style == 2:
         """
         Full-detailed, long-winded format. We ignore seconds.
         """
@@ -403,7 +408,7 @@ def time_format(seconds, style=0):
             else:
                 minutes_str = '%i minutes ' % minutes
         retval = '%s%s%s' % (days_str, hours_str, minutes_str)
-    elif style is 3:
+    elif style == 3:
         """
         Full-detailed, long-winded format. Includes seconds.
         """
@@ -429,6 +434,38 @@ def time_format(seconds, style=0):
             else:
                 seconds_str = '%i seconds ' % seconds
         retval = '%s%s%s%s' % (days_str, hours_str, minutes_str, seconds_str)
+    elif style == 4:
+        """
+        Only return the highest unit.
+        """
+        if days >= 730: # Several years
+            return "{} years".format(days // 365)
+        elif days >= 365: # One year
+            return "a year"
+        elif days >= 62: # Several months
+            return "{} months".format(days // 31)
+        elif days >= 31: # One month
+            return "a month"
+        elif days >= 2: # Several days
+            return "{} days".format(days)
+        elif days > 0:
+            return "a day"
+        elif hours >= 2: # Several hours
+            return "{} hours".format(hours)
+        elif hours > 0: # One hour
+            return "an hour"
+        elif minutes >= 2: # Several minutes
+            return "{} minutes".format(minutes)
+        elif minutes > 0: # One minute
+            return "a minute"
+        elif seconds >= 2: # Several seconds
+            return "{} seconds".format(seconds)
+        elif seconds == 1:
+            return "a second"
+        else:
+            return "0 seconds"
+    else:
+        raise ValueError("Unknown style for time format: %s" % style)
 
     return retval.strip()
 
@@ -519,13 +556,13 @@ def pypath_to_realpath(python_path, file_ending='.py', pypath_prefixes=None):
     """
     path = python_path.strip().split('.')
     plong = osjoin(*path) + file_ending
-    pshort = osjoin(*path[1:]) + file_ending if len(path) > 1 else plong # in case we had evennia. or mygame.
+    pshort = osjoin(*path[1:]) + file_ending if len(path) > 1 else plong  # in case we had evennia. or mygame.
     prefixlong = [osjoin(*ppath.strip().split('.'))
-            for ppath in make_iter(pypath_prefixes)] \
-                if pypath_prefixes else []
+                  for ppath in make_iter(pypath_prefixes)] \
+        if pypath_prefixes else []
     prefixshort = [osjoin(*ppath.strip().split('.')[1:])
-            for ppath in make_iter(pypath_prefixes) if len(ppath.strip().split('.')) > 1] \
-                if pypath_prefixes else []
+                   for ppath in make_iter(pypath_prefixes) if len(ppath.strip().split('.')) > 1]\
+        if pypath_prefixes else []
     paths = [plong] + \
             [osjoin(_EVENNIA_DIR, prefix, plong) for prefix in prefixlong] + \
             [osjoin(_GAME_DIR, prefix, plong) for prefix in prefixlong] + \
@@ -541,12 +578,12 @@ def pypath_to_realpath(python_path, file_ending='.py', pypath_prefixes=None):
     return list(set(p for p in paths if os.path.isfile(p)))
 
 
-def dbref(dbref, reqhash=True):
+def dbref(inp, reqhash=True):
     """
     Converts/checks if input is a valid dbref.
 
     Args:
-        dbref (int or str): A database ref on the form N or #N.
+        inp (int, str): A database ref on the form N or #N.
         reqhash (bool, optional): Require the #N form to accept
             input as a valid dbref.
 
@@ -556,16 +593,16 @@ def dbref(dbref, reqhash=True):
 
     """
     if reqhash:
-        num = (int(dbref.lstrip('#')) if (isinstance(dbref, basestring) and
-                                           dbref.startswith("#") and
-                                           dbref.lstrip('#').isdigit())
+        num = (int(inp.lstrip('#')) if (isinstance(inp, basestring) and
+                                           inp.startswith("#") and
+                                           inp.lstrip('#').isdigit())
                                        else None)
         return num if num > 0 else None
-    elif isinstance(dbref, basestring):
-        dbref = dbref.lstrip('#')
-        return int(dbref) if dbref.isdigit() and int(dbref) > 0 else None
+    elif isinstance(inp, basestring):
+        inp = inp.lstrip('#')
+        return int(inp) if inp.isdigit() and int(inp) > 0 else None
     else:
-        return dbref if isinstance(dbref, int) else None
+        return inp if isinstance(inp, int) else None
 
 
 def dbref_to_obj(inp, objclass, raise_errors=True):
@@ -613,6 +650,7 @@ dbid_to_obj = dbref_to_obj
 _UNICODE_MAP = {"EM DASH": "-", "FIGURE DASH": "-", "EN DASH": "-", "HORIZONTAL BAR": "-",
                 "HORIZONTAL ELLIPSIS": "...", "RIGHT SINGLE QUOTATION MARK": "'"}
 
+
 def latinify(unicode_string, default='?', pure_ascii=False):
     """
     Convert a unicode string to "safe" ascii/latin-1 characters.
@@ -640,7 +678,7 @@ def latinify(unicode_string, default='?', pure_ascii=False):
             # point name; e.g., since `name(u'á') == 'LATIN SMALL
             # LETTER A WITH ACUTE'` translate `á` to `a`.  However, in
             # some cases the unicode name is still "LATIN LETTER"
-            # although no direct equivalent in the Latin alphabeth
+            # although no direct equivalent in the Latin alphabet
             # exists (e.g., Þ, "LATIN CAPITAL LETTER THORN") -- we can
             # avoid these cases by checking that the letter name is
             # composed of one letter only.
@@ -882,31 +920,33 @@ def uses_database(name="sqlite3"):
     return engine == "django.db.backends.%s" % name
 
 
-def delay(delay, callback, *args, **kwargs):
+def delay(timedelay, callback, *args, **kwargs):
     """
     Delay the return of a value.
 
     Args:
-      delay (int or float): The delay in seconds
+      timedelay (int or float): The delay in seconds
       callback (callable): Will be called with optional
-        arguments after `delay` seconds.
+        arguments after `timedelay` seconds.
       args (any, optional): Will be used as arguments to callback
     Kwargs:
         any (any): Will be used to call the callback.
 
     Returns:
         deferred (deferred): Will fire fire with callback after
-            `delay` seconds. Note that if `delay()` is used in the
+            `timedelay` seconds. Note that if `timedelay()` is used in the
             commandhandler callback chain, the callback chain can be
             defined directly in the command body and don't need to be
             specified here.
 
     """
-    return reactor.callLater(delay, callback, *args, **kwargs)
+    return task.deferLater(reactor, timedelay, callback, *args, **kwargs)
 
 
 _TYPECLASSMODELS = None
 _OBJECTMODELS = None
+
+
 def clean_object_caches(obj):
     """
     Clean all object caches on the given object.
@@ -1107,7 +1147,7 @@ def mod_import(module):
                 result = imp.find_module(modname, [path])
             except ImportError:
                 logger.log_trace("Could not find module '%s' (%s.py) at path '%s'" % (modname, modname, path))
-                return
+                return None
             try:
                 mod = imp.load_module(modname, *result)
             except ImportError:
@@ -1143,8 +1183,6 @@ def all_from_module(module):
     # module if available (try to avoid not imports)
     members = getmembers(mod, predicate=lambda obj: getmodule(obj) in (mod, None))
     return dict((key, val) for key, val in members if not key.startswith("_"))
-    #return dict((key, val) for key, val in mod.__dict__.items()
-    #                        if not (key.startswith("_") or ismodule(val)))
 
 
 def callables_from_module(module):
@@ -1206,7 +1244,7 @@ def variable_from_module(module, variable=None, default=None):
     else:
         # get all
         result = [val for key, val in mod.__dict__.items()
-                         if not (key.startswith("_") or ismodule(val))]
+                  if not (key.startswith("_") or ismodule(val))]
 
     if len(result) == 1:
         return result[0]
@@ -1345,6 +1383,7 @@ def class_from_module(path, defaultpaths=None):
 # alias
 object_from_module = class_from_module
 
+
 def init_new_player(player):
     """
     Deprecated.
@@ -1439,7 +1478,7 @@ def string_partial_matching(alternatives, inp, ret_index=True):
             # (this will invalidate input in the wrong word order)
             submatch = [last_index + alt_num for alt_num, alt_word
                         in enumerate(alt_words[last_index:])
-                                     if alt_word.startswith(inp_word)]
+                        if alt_word.startswith(inp_word)]
             if submatch:
                 last_index = min(submatch) + 1
                 score += 1
@@ -1485,7 +1524,7 @@ def format_table(table, extra_space=1):
         for ir, row in enumarate(ftable):
             if ir == 0:
                 # make first row white
-                string += "\n{w" + ""join(row) + "{n"
+                string += "\n|w" + ""join(row) + "|n"
             else:
                 string += "\n" + "".join(row)
         print string
@@ -1536,6 +1575,8 @@ def get_evennia_pids():
 
 from gc import get_referents
 from sys import getsizeof
+
+
 def deepsize(obj, max_depth=4):
     """
     Get not only size of the given object, but also the size of
@@ -1559,21 +1600,22 @@ def deepsize(obj, max_depth=4):
 
     """
     def _recurse(o, dct, depth):
-        if max_depth >= 0 and depth > max_depth:
+        if 0 <= max_depth < depth:
             return
         for ref in get_referents(o):
             idr = id(ref)
-            if not idr in dct:
+            if idr not in dct:
                 dct[idr] = (ref, getsizeof(ref, default=0))
                 _recurse(ref, dct, depth+1)
     sizedict = {}
     _recurse(obj, sizedict, 0)
-    #count = len(sizedict) + 1
     size = getsizeof(obj) + sum([p[1] for p in sizedict.values()])
     return size
 
 # lazy load handler
 _missing = object()
+
+
 class lazy_property(object):
     """
     Delays loading of property until first access. Credit goes to the
@@ -1594,14 +1636,14 @@ class lazy_property(object):
 
     """
     def __init__(self, func, name=None, doc=None):
-        "Store all properties for now"
+        """Store all properties for now"""
         self.__name__ = name or func.__name__
         self.__module__ = func.__module__
         self.__doc__ = doc or func.__doc__
         self.func = func
 
     def __get__(self, obj, type=None):
-        "Triggers initialization"
+        """Triggers initialization"""
         if obj is None:
             return self
         value = obj.__dict__.get(self.__name__, _missing)
@@ -1611,7 +1653,9 @@ class lazy_property(object):
         return value
 
 _STRIP_ANSI = None
-_RE_CONTROL_CHAR = re.compile('[%s]' % re.escape(''.join([unichr(c) for c in range(0,32)])))# + range(127,160)])))
+_RE_CONTROL_CHAR = re.compile('[%s]' % re.escape(''.join([unichr(c) for c in range(0, 32)])))  # + range(127,160)])))
+
+
 def strip_control_sequences(string):
     """
     Remove non-print text sequences.
@@ -1643,7 +1687,7 @@ def calledby(callerdepth=1):
             us.
 
     """
-    import inspect, os
+    import inspect
     stack = inspect.stack()
     # we must step one extra level back in stack since we don't want
     # to include the call of this function itself.
@@ -1672,12 +1716,12 @@ def m_len(target):
         return len(ANSI_PARSER.strip_mxp(target))
     return len(target)
 
-#------------------------------------------------------------------
+# -------------------------------------------------------------------
 # Search handler function
-#------------------------------------------------------------------
+# -------------------------------------------------------------------
 #
 # Replace this hook function by changing settings.SEARCH_AT_RESULT.
-#
+
 
 def at_search_result(matches, caller, query="", quiet=False, **kwargs):
     """
@@ -1693,7 +1737,7 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
             should the result pass through.
         caller (Object): The object performing the search and/or which should
         receive error messages.
-    query (str, optional): The search query used to produce `matches`.
+        query (str, optional): The search query used to produce `matches`.
         quiet (bool, optional): If `True`, no messages will be echoed to caller
             on errors.
 
@@ -1771,6 +1815,7 @@ class LimitedSizeOrderedDict(OrderedDict):
         super(LimitedSizeOrderedDict, self).update(*args, **kwargs)
         self._check_size()
 
+
 def get_game_dir_path():
     """
     This is called by settings_default in order to determine the path
@@ -1781,7 +1826,7 @@ def get_game_dir_path():
 
     """
     # current working directory, assumed to be somewhere inside gamedir.
-    for i in range(10):
+    for _ in range(10):
         gpath = os.getcwd()
         if "server" in os.listdir(gpath):
             if os.path.isfile(os.path.join("server", "conf", "settings.py")):

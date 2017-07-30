@@ -182,7 +182,6 @@ def import_cmdset(path, cmdsetobj, emit_to_obj=None, no_logging=False):
             #instantiate the cmdset (and catch its errors)
             if callable(cmdsetclass):
                 cmdsetclass = cmdsetclass(cmdsetobj)
-            errstring = ""
             return cmdsetclass
         except ImportError as err:
             logger.log_trace()
@@ -224,7 +223,7 @@ def import_cmdset(path, cmdsetobj, emit_to_obj=None, no_logging=False):
         err_cmdset = _ErrorCmdSet()
         err_cmdset.errmessage = errstring
         return err_cmdset
-
+    return None # undefined error
 
 # classes
 

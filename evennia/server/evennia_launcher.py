@@ -167,7 +167,7 @@ ERROR_SETTINGS = \
            errors mentioning 'DJANGO_SETTINGS_MODULE'. If you run a
            virtual machine, it might be worth to restart it to see if
            this resolves the issue.
-    """.format(settingsfile=SETTINGFILE, settingspath=SETTINGS_PATH)
+    """.format(settingspath=SETTINGS_PATH)
 
 ERROR_INITSETTINGS = \
     """
@@ -315,7 +315,7 @@ ERROR_LOGDIR_MISSING = \
     will be created automatically).
 
     (Explanation: Evennia creates the log directory automatically when
-    initializating a new game directory. This error usually happens if
+    initializing a new game directory. This error usually happens if
     you used git to clone a pre-created game directory - since log
     files are in .gitignore they will not be cloned, which leads to
     the log directory also not being created.)
@@ -402,7 +402,6 @@ def evennia_version():
     """
     version = "Unknown"
     try:
-        import evennia
         version = evennia.__version__
     except ImportError:
         # even if evennia is not found, we should not crash here.
@@ -507,7 +506,7 @@ def create_secret_key():
     return secret_key
 
 
-def create_settings_file(init=True):
+def create_settings_file(init=True, secret_settings=False):
     """
     Uses the template settings file to build a working settings file.
 
@@ -515,18 +514,27 @@ def create_settings_file(init=True):
         init (bool): This is part of the normal evennia --init
             operation.  If false, this function will copy a fresh
             template file in (asking if it already exists).
+        secret_settings (bool, optional): If False, create settings.py, otherwise
+            create the secret_settings.py file.
 
     """
-    settings_path = os.path.join(GAMEDIR, "server", "conf", "settings.py")
+    if secret_settings:
+        settings_path = os.path.join(GAMEDIR, "server", "conf", "secret_settings.py")
+        setting_dict = {"secret_key": "\'%s\'" % create_secret_key()}
+    else:
+        settings_path = os.path.join(GAMEDIR, "server", "conf", "settings.py")
+        setting_dict = {
+            "settings_default": os.path.join(EVENNIA_LIB, "settings_default.py"),
+            "servername": "\"%s\"" % GAMEDIR.rsplit(os.path.sep, 1)[1].capitalize(),
+            "secret_key": "\'%s\'" % create_secret_key()}
 
     if not init:
         # if not --init mode, settings file may already exist from before
         if os.path.exists(settings_path):
-            inp = input("server/conf/settings.py already exists. "
-                            "Do you want to reset it? y/[N]> ")
+            inp = input("%s already exists. Do you want to reset it? y/[N]> " % settings_path)
             if not inp.lower() == 'y':
                 print ("Aborted.")
-                sys.exit()
+                return
             else:
                 print ("Reset the settings file.")
 
@@ -535,12 +543,6 @@ def create_settings_file(init=True):
 
     with open(settings_path, 'r') as f:
         settings_string = f.read()
-
-    # tweak the settings
-    setting_dict = {
-        "settings_default": os.path.join(EVENNIA_LIB, "settings_default.py"),
-        "servername": "\"%s\"" % GAMEDIR.rsplit(os.path.sep, 1)[1].capitalize(),
-        "secret_key": "\'%s\'" % create_secret_key()}
 
     settings_string = settings_string.format(**setting_dict)
 
@@ -565,8 +567,13 @@ def create_game_directory(dirname):
         sys.exit()
     # copy template directory
     shutil.copytree(EVENNIA_TEMPLATE, GAMEDIR)
+    # rename gitignore to .gitignore
+    os.rename(os.path.join(GAMEDIR, 'gitignore'),
+              os.path.join(GAMEDIR, '.gitignore'))
+
     # pre-build settings file in the new GAMEDIR
     create_settings_file()
+    create_settings_file(secret_settings=True)
 
 
 def create_superuser():
@@ -594,7 +601,6 @@ def check_database():
         tables = [tableinfo.name for tableinfo in tables]
     if tables and u'players_playerdb' in tables:
         # database exists and seems set up. Initialize evennia.
-        import evennia
         evennia._init()
     # Try to get Player#1
     from evennia.players.models import PlayerDB
@@ -668,6 +674,7 @@ def get_pid(pidfile):
         with open(pidfile, 'r') as f:
             pid = f.read()
             return pid
+    return None
 
 
 def del_pid(pidfile):
@@ -684,7 +691,7 @@ def del_pid(pidfile):
         os.remove(pidfile)
 
 
-def kill(pidfile, signal=SIG, succmsg="", errmsg="",
+def kill(pidfile, killsignal=SIG, succmsg="", errmsg="",
          restart_file=SERVER_RESTART, restart=False):
     """
     Send a kill signal to a process based on PID. A customized
@@ -693,7 +700,7 @@ def kill(pidfile, signal=SIG, succmsg="", errmsg="",
 
     Args:
         pidfile (str): The path of the pidfile to get the PID from.
-        signal (int, optional): Signal identifier.
+        killsignal (int, optional): Signal identifier for signal to send.
         succmsg (str, optional): Message to log on success.
         errmsg (str, optional): Message to log on failure.
         restart_file (str, optional): Restart file location.
@@ -728,7 +735,7 @@ def kill(pidfile, signal=SIG, succmsg="", errmsg="",
             else:
                 # Linux can send the SIGINT signal directly
                 # to the specified PID.
-                os.kill(int(pid), signal)
+                os.kill(int(pid), killsignal)
 
         except OSError:
             print("Process %(pid)s cannot be stopped. "\
@@ -751,10 +758,8 @@ def show_version_info(about=False):
         version_info (str): A complete version info string.
 
     """
-    import os
     import sys
     import twisted
-    import django
 
     return VERSION_INFO.format(
         version=EVENNIA_VERSION, about=ABOUT_INFO if about else "",
@@ -771,66 +776,32 @@ def error_check_python_modules():
     python source files themselves). Best they fail already here
     before we get any further.
 
-    Raises:
-        DeprecationWarning: For trying to access various modules
-        (usually in `settings.py`) which are no longer supported.
-
     """
+
     from django.conf import settings
-    def imp(path, split=True):
+    def _imp(path, split=True):
+        "helper method"
         mod, fromlist = path, "None"
         if split:
             mod, fromlist = path.rsplit('.', 1)
         __import__(mod, fromlist=[fromlist])
 
+    # check the historical deprecations
+    from evennia.server import deprecations
+    try:
+        deprecations.check_errors(settings)
+        deprecations.check_warnings(settings)
+    except DeprecationWarning as err:
+        print(err)
+        sys.exit()
+
     # core modules
-    imp(settings.COMMAND_PARSER)
-    imp(settings.SEARCH_AT_RESULT)
-    imp(settings.CONNECTION_SCREEN_MODULE)
+    _imp(settings.COMMAND_PARSER)
+    _imp(settings.SEARCH_AT_RESULT)
+    _imp(settings.CONNECTION_SCREEN_MODULE)
     #imp(settings.AT_INITIAL_SETUP_HOOK_MODULE, split=False)
     for path in settings.LOCK_FUNC_MODULES:
-        imp(path, split=False)
-    # cmdsets
-
-    deprstring = ("settings.%s should be renamed to %s. If defaults are used, "
-                  "their path/classname must be updated "
-                  "(see evennia/settings_default.py).")
-    if hasattr(settings, "CMDSET_DEFAULT"):
-        raise DeprecationWarning(deprstring % (
-            "CMDSET_DEFAULT", "CMDSET_CHARACTER"))
-    if hasattr(settings, "CMDSET_OOC"):
-        raise DeprecationWarning(deprstring % ("CMDSET_OOC", "CMDSET_PLAYER"))
-    if settings.WEBSERVER_ENABLED and not isinstance(settings.WEBSERVER_PORTS[0], tuple):
-        raise DeprecationWarning(
-            "settings.WEBSERVER_PORTS must be on the form "
-            "[(proxyport, serverport), ...]")
-    if hasattr(settings, "BASE_COMM_TYPECLASS"):
-        raise DeprecationWarning(deprstring % (
-            "BASE_COMM_TYPECLASS", "BASE_CHANNEL_TYPECLASS"))
-    if hasattr(settings, "COMM_TYPECLASS_PATHS"):
-        raise DeprecationWarning(deprstring % (
-            "COMM_TYPECLASS_PATHS", "CHANNEL_TYPECLASS_PATHS"))
-    if hasattr(settings, "CHARACTER_DEFAULT_HOME"):
-        raise DeprecationWarning(
-            "settings.CHARACTER_DEFAULT_HOME should be renamed to "
-            "DEFAULT_HOME. See also settings.START_LOCATION "
-            "(see evennia/settings_default.py).")
-    deprstring = ("settings.%s is now merged into settings.TYPECLASS_PATHS. "
-                  "Update your settings file.")
-    if hasattr(settings, "OBJECT_TYPECLASS_PATHS"):
-        raise DeprecationWarning(deprstring % "OBJECT_TYPECLASS_PATHS")
-    if hasattr(settings, "SCRIPT_TYPECLASS_PATHS"):
-        raise DeprecationWarning(deprstring % "SCRIPT_TYPECLASS_PATHS")
-    if hasattr(settings, "PLAYER_TYPECLASS_PATHS"):
-        raise DeprecationWarning(deprstring % "PLAYER_TYPECLASS_PATHS")
-    if hasattr(settings, "CHANNEL_TYPECLASS_PATHS"):
-        raise DeprecationWarning(deprstring % "CHANNEL_TYPECLASS_PATHS")
-    if hasattr(settings, "SEARCH_MULTIMATCH_SEPARATOR"):
-        raise DeprecationWarning(
-        "settings.SEARCH_MULTIMATCH_SEPARATOR was replaced by "
-        "SEARCH_MULTIMATCH_REGEX and SEARCH_MULTIMATCH_TEMPLATE. "
-        "Update your settings file (see evennia/settings_default.py "
-        "for more info).")
+        _imp(path, split=False)
 
     from evennia.commands import cmdsethandler
     if not cmdsethandler.import_cmdset(settings.CMDSET_UNLOGGEDIN, None):
@@ -840,13 +811,12 @@ def error_check_python_modules():
     if not cmdsethandler.import_cmdset(settings.CMDSET_PLAYER, None):
         print("Warning: CMDSET_PLAYER failed to load")
     # typeclasses
-    imp(settings.BASE_PLAYER_TYPECLASS)
-    imp(settings.BASE_OBJECT_TYPECLASS)
-    imp(settings.BASE_CHARACTER_TYPECLASS)
-    imp(settings.BASE_ROOM_TYPECLASS)
-    imp(settings.BASE_EXIT_TYPECLASS)
-    imp(settings.BASE_SCRIPT_TYPECLASS)
-
+    _imp(settings.BASE_PLAYER_TYPECLASS)
+    _imp(settings.BASE_OBJECT_TYPECLASS)
+    _imp(settings.BASE_CHARACTER_TYPECLASS)
+    _imp(settings.BASE_ROOM_TYPECLASS)
+    _imp(settings.BASE_EXIT_TYPECLASS)
+    _imp(settings.BASE_SCRIPT_TYPECLASS)
 
 def init_game_directory(path, check_db=True):
     """

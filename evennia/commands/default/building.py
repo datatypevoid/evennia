@@ -184,7 +184,8 @@ class CmdCopy(ObjManipCommand):
     copy an object and its properties
 
     Usage:
-      @copy[/reset] <original obj> [= new_name][;alias;alias..][:new_location] [,new_name2 ...]
+      @copy[/reset] <original obj> [= <new_name>][;alias;alias..]
+      [:<new_location>] [,<new_name2> ...]
 
     switch:
       reset - make a 'clean' copy off the object, thus
@@ -205,7 +206,8 @@ class CmdCopy(ObjManipCommand):
         caller = self.caller
         args = self.args
         if not args:
-            caller.msg("Usage: @copy <obj> [=new_name[;alias;alias..]][:new_location] [, new_name2...]")
+            caller.msg("Usage: @copy <obj> [=<new_name>[;alias;alias..]]"
+                       "[:<new_location>] [, <new_name2>...]")
             return
 
         if not self.rhs:
@@ -364,14 +366,14 @@ class CmdCpAttr(ObjManipCommand):
             self.caller.msg("|RCannot have duplicate source names when moving!")
             return
 
-        string = ""
+        result = []
 
         for to_obj in to_objs:
             to_obj_name = to_obj['name']
             to_obj_attrs = to_obj['attrs']
             to_obj = caller.search(to_obj_name)
             if not to_obj:
-                string += "\nCould not find object '%s'" % to_obj_name
+                result.append("\nCould not find object '%s'" % to_obj_name)
                 continue
             for inum, from_attr in enumerate(from_obj_attrs):
                 try:
@@ -387,18 +389,18 @@ class CmdCpAttr(ObjManipCommand):
                 if (clear and not (from_obj == to_obj and
                                                      from_attr == to_attr)):
                     from_obj.attributes.remove(from_attr)
-                    string += "\nMoved %s.%s -> %s.%s. (value: %s)" % (from_obj.name,
-                                                                       from_attr,
-                                                                       to_obj_name,
-                                                                       to_attr,
-                                                                       repr(value))
+                    result.append("\nMoved %s.%s -> %s.%s. (value: %s)" % (from_obj.name,
+                                                                           from_attr,
+                                                                           to_obj_name,
+                                                                           to_attr,
+                                                                           repr(value)))
                 else:
-                    string += "\nCopied %s.%s -> %s.%s. (value: %s)" % (from_obj.name,
-                                                            from_attr,
-                                                            to_obj_name,
-                                                            to_attr,
-                                                            repr(value))
-        caller.msg(string)
+                    result.append("\nCopied %s.%s -> %s.%s. (value: %s)" % (from_obj.name,
+                                                                            from_attr,
+                                                                            to_obj_name,
+                                                                            to_attr,
+                                                                            repr(value)))
+        caller.msg("".join(result))
 
 
 class CmdMvAttr(ObjManipCommand):
@@ -446,7 +448,7 @@ class CmdCreate(ObjManipCommand):
     create new objects
 
     Usage:
-      @create[/drop] objname[;alias;alias...][:typeclass], objname...
+      @create[/drop] <objname>[;alias;alias...][:typeclass], <objname>...
 
     switch:
        drop - automatically drop the new object into your current
@@ -481,7 +483,7 @@ class CmdCreate(ObjManipCommand):
         caller = self.caller
 
         if not self.args:
-            string = "Usage: @create[/drop] <newname>[;alias;alias...] [:typeclass_path]"
+            string = "Usage: @create[/drop] <newname>[;alias;alias...] [:typeclass.path]"
             caller.msg(string)
             return
 
@@ -563,22 +565,6 @@ class CmdDesc(COMMAND_DEFAULT_CLASS):
         if not obj:
             return
 
-        def load(caller):
-            return caller.db.evmenu_target.db.desc or ""
-
-        def save(caller, buf):
-            """
-            Save line buffer to the desc prop. This should
-            return True if successful and also report its status to the user.
-            """
-            caller.db.evmenu_target.db.desc = buf
-            caller.msg("Saved.")
-            return True
-
-        def quit(caller):
-            caller.attributes.remove("evmenu_target")
-            caller.msg("Exited editor.")
-
         self.caller.db.evmenu_target = obj
         # launch the editor
         EvEditor(self.caller, loadfunc=_desc_load, savefunc=_desc_save, quitfunc=_desc_quit, key="desc", persistent=True)
@@ -607,9 +593,11 @@ class CmdDesc(COMMAND_DEFAULT_CLASS):
             if not obj:
                 return
             desc = self.args
-
-        obj.db.desc = desc
-        caller.msg("The description was set on %s." % obj.get_display_name(caller))
+        if obj.access(caller, "edit"):
+            obj.db.desc = desc
+            caller.msg("The description was set on %s." % obj.get_display_name(caller))
+        else:
+            caller.msg("You don't have permission to edit the description of %s." % obj.key)
 
 
 class CmdDestroy(COMMAND_DEFAULT_CLASS):
@@ -676,7 +664,7 @@ class CmdDestroy(COMMAND_DEFAULT_CLASS):
                     string += " Objects inside %s were moved to their homes." % objname
             return string
 
-        string = ""
+        result = []
         for objname in self.lhslist:
             if '-' in objname:
                 # might be a range of dbrefs
@@ -684,13 +672,13 @@ class CmdDestroy(COMMAND_DEFAULT_CLASS):
                               for part in objname.split('-', 1)]
                 if dmin and dmax:
                     for dbref in range(int(dmin), int(dmax + 1)):
-                        string += delobj("#" + str(dbref), True)
+                        result.append(delobj("#" + str(dbref), True))
                 else:
-                    string += delobj(objname)
+                    result.append(delobj(objname))
             else:
-                string += delobj(objname, True)
-        if string:
-            caller.msg(string.strip())
+                result.append(delobj(objname, True))
+        if result:
+            caller.msg("".join(result).strip())
 
 
 class CmdDig(ObjManipCommand):
@@ -698,9 +686,9 @@ class CmdDig(ObjManipCommand):
     build new rooms and connect them to the current location
 
     Usage:
-      @dig[/switches] roomname[;alias;alias...][:typeclass]
-            [= exit_to_there[;alias][:typeclass]]
-               [, exit_to_here[;alias][:typeclass]]
+      @dig[/switches] <roomname>[;alias;alias...][:typeclass]
+            [= <exit_to_there>[;alias][:typeclass]]
+               [, <exit_to_here>[;alias][:typeclass]]
 
     Switches:
        tel or teleport - move yourself to the new room
@@ -732,9 +720,10 @@ class CmdDig(ObjManipCommand):
         caller = self.caller
 
         if not self.lhs:
-            string = "Usage: @dig[/teleport] roomname[;alias;alias...][:parent] [= exit_there"
+            string = "Usage: @dig[/teleport] <roomname>[;alias;alias...]" \
+                     "[:parent] [= <exit_there>"
             string += "[;alias;alias..][:parent]] "
-            string += "[, exit_back_here[;alias;alias..][:parent]]"
+            string += "[, <exit_back_here>[;alias;alias..][:parent]]"
             caller.msg(string)
             return
 
@@ -837,7 +826,7 @@ class CmdTunnel(COMMAND_DEFAULT_CLASS):
     create new rooms in cardinal directions only
 
     Usage:
-      @tunnel[/switch] <direction> [= roomname[;alias;alias;...][:typeclass]]
+      @tunnel[/switch] <direction> [= <roomname>[;alias;alias;...][:typeclass]]
 
     Switches:
       oneway - do not create an exit back to the current location
@@ -882,7 +871,8 @@ class CmdTunnel(COMMAND_DEFAULT_CLASS):
         "Implements the tunnel command"
 
         if not self.args or not self.lhs:
-            string = "Usage: @tunnel[/switch] <direction> [= roomname[;alias;alias;...][:typeclass]]"
+            string = "Usage: @tunnel[/switch] <direction> [= <roomname>" \
+                     "[;alias;alias;...][:typeclass]]"
             self.caller.msg(string)
             return
         if self.lhs not in self.directions:
@@ -1039,7 +1029,7 @@ class CmdSetHome(CmdLink):
     set an object's home location
 
     Usage:
-      @home <obj> [= home_location]
+      @home <obj> [= <home_location>]
 
     The "home" location is a "safety" location for objects; they
     will be moved there if their current location ceases to exist. All
@@ -1057,7 +1047,7 @@ class CmdSetHome(CmdLink):
     def func(self):
         "implement the command"
         if not self.args:
-            string = "Usage: @home <obj> [= home_location]"
+            string = "Usage: @home <obj> [= <home_location>]"
             self.caller.msg(string)
             return
 
@@ -1091,7 +1081,7 @@ class CmdListCmdSets(COMMAND_DEFAULT_CLASS):
     list command sets defined on an object
 
     Usage:
-      @cmdsets [obj]
+      @cmdsets <obj>
 
     This displays all cmdsets assigned
     to a user. Defaults to yourself.
@@ -1120,7 +1110,7 @@ class CmdName(ObjManipCommand):
     change the name and/or aliases of an object
 
     Usage:
-      @name obj = name;alias1;alias2
+      @name <obj> = <newname>;alias1;alias2
 
     Rename an object to something new. Use *obj to
     rename a player.
@@ -1140,6 +1130,7 @@ class CmdName(ObjManipCommand):
             caller.msg("Usage: @name <obj> = <newname>[;alias;alias;...]")
             return
 
+        obj = None
         if self.lhs_objs:
             objname = self.lhs_objs[0]['name']
             if objname.startswith("*"):
@@ -1154,7 +1145,7 @@ class CmdName(ObjManipCommand):
                         caller.msg("No name defined!")
                         return
                     if not (obj.access(caller, "control") or obj.access(caller, "edit")):
-                        caller.mgs("You don't have right to edit this player %s." % obj)
+                        caller.msg("You don't have right to edit this player %s." % obj)
                         return
                     obj.username = newname
                     obj.save()
@@ -1224,7 +1215,7 @@ class CmdOpen(ObjManipCommand):
         if len(exit_obj) > 1:
             # give error message and return
             caller.search(exit_name, location=location, exact=True)
-            return
+            return None
         if exit_obj:
             exit_obj = exit_obj[0]
             if not exit_obj.destination:
@@ -1315,11 +1306,11 @@ class CmdOpen(ObjManipCommand):
             back_exit_name = self.lhs_objs[1]['name']
             back_exit_aliases = self.lhs_objs[1]['aliases']
             back_exit_typeclass = self.lhs_objs[1]['option']
-            ok = self.create_exit(back_exit_name,
-                                  destination,
-                                  location,
-                                  back_exit_aliases,
-                                  back_exit_typeclass)
+            self.create_exit(back_exit_name,
+                             destination,
+                             location,
+                             back_exit_aliases,
+                             back_exit_typeclass)
 
 
 def _convert_from_string(cmd, strobj):
@@ -1336,7 +1327,7 @@ def _convert_from_string(cmd, strobj):
      Python 2.6 and later:
     Supports all Python structures through literal_eval as long as they
     are valid Python syntax. If they are not (such as [test, test2], ie
-    withtout the quotes around the strings), the entire structure will
+    without the quotes around the strings), the entire structure will
     be converted to a string and a warning will be given.
 
     We need to convert like this since all data being sent over the
@@ -1401,7 +1392,7 @@ class CmdSetAttribute(ObjManipCommand):
       @set <obj>/<attr> = <value>
       @set <obj>/<attr> =
       @set <obj>/<attr>
-      @set *<player>/attr = <value>
+      @set *<player>/<attr> = <value>
 
     Switch:
         edit: Open the line editor (string values only)
@@ -1412,7 +1403,7 @@ class CmdSetAttribute(ObjManipCommand):
     (if any).
 
     The most common data to save with this command are strings and
-    numbers. You can however also set Python primities such as lists,
+    numbers. You can however also set Python primitives such as lists,
     dictionaries and tuples on objects (this might be important for
     the functionality of certain custom objects).  This is indicated
     by you starting your value with one of |c'|n, |c"|n, |c(|n, |c[|n
@@ -1528,7 +1519,7 @@ class CmdSetAttribute(ObjManipCommand):
         if not self.check_obj(obj):
             return
 
-        string = ""
+        result = []
         if "edit" in self.switches:
             # edit in the line editor
             if len(attrs) > 1:
@@ -1545,25 +1536,25 @@ class CmdSetAttribute(ObjManipCommand):
                 for attr in attrs:
                     if not self.check_attr(obj, attr):
                         continue
-                    string += self.view_attr(obj, attr)
+                    result.append(self.view_attr(obj, attr))
                 # we view it without parsing markup.
-                self.caller.msg(string.strip(), options={"raw":True})
+                self.caller.msg("".join(result).strip(), options={"raw":True})
                 return
             else:
                 # deleting the attribute(s)
                 for attr in attrs:
                     if not self.check_attr(obj, attr):
                         continue
-                    string += self.rm_attr(obj, attr)
+                    result.append(self.rm_attr(obj, attr))
         else:
             # setting attribute(s). Make sure to convert to real Python type before saving.
             for attr in attrs:
                 if not self.check_attr(obj, attr):
                     continue
                 value = _convert_from_string(self, value)
-                string += self.set_attr(obj, attr, value)
+                result.append(self.set_attr(obj, attr, value))
         # send feedback
-        caller.msg(string.strip('\n'))
+        caller.msg("".join(result).strip('\n'))
 
 
 class CmdTypeclass(COMMAND_DEFAULT_CLASS):
@@ -1571,7 +1562,7 @@ class CmdTypeclass(COMMAND_DEFAULT_CLASS):
     set or change an object's typeclass
 
     Usage:
-      @typclass[/switch] <object> [= <typeclass.path>]
+      @typeclass[/switch] <object> [= typeclass.path]
       @type                     ''
       @parent                   ''
       @swap - this is a shorthand for using /force/reset flags.
@@ -1588,7 +1579,7 @@ class CmdTypeclass(COMMAND_DEFAULT_CLASS):
     Example:
       @type button = examples.red_button.RedButton
 
-    If the typeclass.path is not given, the current object's
+    If the typeclass_path is not given, the current object's
     typeclass is assumed.
 
     View or set an object's typeclass. If setting, the creation hooks
@@ -1617,7 +1608,7 @@ class CmdTypeclass(COMMAND_DEFAULT_CLASS):
         caller = self.caller
 
         if not self.args:
-            caller.msg("Usage: %s <object> [=<typeclass]" % self.cmdstring)
+            caller.msg("Usage: %s <object> [= typeclass]" % self.cmdstring)
             return
 
         # get object to swap on
@@ -1634,6 +1625,7 @@ class CmdTypeclass(COMMAND_DEFAULT_CLASS):
 
         if "show" in self.switches:
             string = "%s's current typeclass is %s." % (obj.name, obj.__class__)
+            caller.msg(string)
             return
 
         if self.cmdstring == "@swap":
@@ -1687,7 +1679,7 @@ class CmdWipe(ObjManipCommand):
     clear all attributes from an object
 
     Usage:
-      @wipe <object>[/attribute[/attribute...]]
+      @wipe <object>[/<attr>[/<attr>...]]
 
     Example:
       @wipe box
@@ -1708,7 +1700,7 @@ class CmdWipe(ObjManipCommand):
         caller = self.caller
 
         if not self.args:
-            caller.msg("Usage: @wipe <object>[/attribute/attribute...]")
+            caller.msg("Usage: @wipe <object>[/<attr>/<attr>...]")
             return
 
         # get the attributes set by our custom parser
@@ -1740,7 +1732,7 @@ class CmdLock(ObjManipCommand):
     Usage:
       @lock <object>[ = <lockstring>]
       or
-      @lock[/switch] object/<access_type>
+      @lock[/switch] <object>/<access_type>
 
     Switch:
       del - delete given access type
@@ -1760,7 +1752,7 @@ class CmdLock(ObjManipCommand):
     an object locked with this string will only be possible to
     pick up by Wizards or by object with id 25.
 
-    You can add several access_types after oneanother by separating
+    You can add several access_types after one another by separating
     them by ';', i.e:
        'get:id(25);delete:perm(Builders)'
     """
@@ -1774,7 +1766,8 @@ class CmdLock(ObjManipCommand):
 
         caller = self.caller
         if not self.args:
-            string = "@lock <object>[ = <lockstring>] or @lock[/switch] object/<access_type>"
+            string = "@lock <object>[ = <lockstring>] or @lock[/switch] " \
+                     "<object>/<access_type>"
             caller.msg(string)
             return
 
@@ -1939,6 +1932,10 @@ class CmdExamine(ObjManipCommand):
             string += "\n|wLocation|n: %s" % obj.location
             if obj.location:
                 string += " (#%s)" % obj.location.id
+        if hasattr(obj, "home"):
+            string += "\n|wHome|n: %s" % obj.home
+            if obj.home:
+                string += " (#%s)" % obj.home.id
         if hasattr(obj, "destination") and obj.destination:
             string += "\n|wDestination|n: %s" % obj.destination
             if obj.destination:
@@ -2060,7 +2057,7 @@ class CmdExamine(ObjManipCommand):
                     self.msg(caller.at_look(obj))
                     return
                 # using callback for printing result whenever function returns.
-                get_and_merge_cmdsets(obj, self.session, self.player, obj, "object").addCallback(get_cmdset_callback)
+                get_and_merge_cmdsets(obj, self.session, self.player, obj, "object", self.raw_string).addCallback(get_cmdset_callback)
             else:
                 self.msg("You need to supply a target to examine.")
             return
@@ -2103,7 +2100,7 @@ class CmdExamine(ObjManipCommand):
                 else:
                     mergemode = "object"
                 # using callback to print results whenever function returns.
-                get_and_merge_cmdsets(obj, self.session, self.player, obj, mergemode).addCallback(get_cmdset_callback)
+                get_and_merge_cmdsets(obj, self.session, self.player, obj, mergemode, self.raw_string).addCallback(get_cmdset_callback)
 
 
 class CmdFind(COMMAND_DEFAULT_CLASS):
@@ -2253,7 +2250,7 @@ class CmdTeleport(COMMAND_DEFAULT_CLASS):
                switch is set, <target location> is ignored.
                Note that the only way to retrieve
                an object from a None location is by direct #dbref
-               reference.
+               reference. A puppeted object cannot be moved to None.
 
     Teleports an object somewhere. If no object is given, you yourself
     is teleported to the target location.     """
@@ -2278,19 +2275,21 @@ class CmdTeleport(COMMAND_DEFAULT_CLASS):
             # teleporting to None
             if not args:
                 obj_to_teleport = caller
-                caller.msg("Teleported to None-location.")
-                if caller.location and not tel_quietly:
-                    caller.location.msg_contents("%s teleported into nothingness." % caller, exclude=caller)
             else:
                 obj_to_teleport = caller.search(lhs, global_search=True)
                 if not obj_to_teleport:
                     caller.msg("Did not find object to teleport.")
                     return
-                caller.msg("Teleported %s -> None-location." % obj_to_teleport)
-                if obj_to_teleport.location and not tel_quietly:
-                    obj_to_teleport.location.msg_contents("%s teleported %s into nothingness."
-                                                          % (caller, obj_to_teleport),
-                                                          exclude=caller)
+            if obj_to_teleport.has_player:
+                caller.msg("Cannot teleport a puppeted object "
+                           "(%s, puppeted by %s) to a None-location." % (
+                            obj_to_teleport.key, obj_to_teleport.player))
+                return
+            caller.msg("Teleported %s -> None-location." % obj_to_teleport)
+            if obj_to_teleport.location and not tel_quietly:
+                obj_to_teleport.location.msg_contents("%s teleported %s into nothingness."
+                                                      % (caller, obj_to_teleport),
+                                                      exclude=caller)
             obj_to_teleport.location=None
             return
 
@@ -2341,7 +2340,7 @@ class CmdScript(COMMAND_DEFAULT_CLASS):
     attach a script to an object
 
     Usage:
-      @script[/switch] <obj> [= <script.path or scriptkey>]
+      @script[/switch] <obj> [= script_path or <scriptkey>]
 
     Switches:
       start - start all non-running scripts on object, or a given script only
@@ -2367,7 +2366,7 @@ class CmdScript(COMMAND_DEFAULT_CLASS):
         caller = self.caller
 
         if not self.args:
-            string = "Usage: @script[/switch] <obj> [= <script.path or script key>]"
+            string = "Usage: @script[/switch] <obj> [= script_path or <script key>]"
             caller.msg(string)
             return
 
@@ -2379,38 +2378,37 @@ class CmdScript(COMMAND_DEFAULT_CLASS):
         if not obj:
             return
 
-        string = ""
+        result = []
         if not self.rhs:
             # no rhs means we want to operate on all scripts
             scripts = obj.scripts.all()
             if not scripts:
-                string += "No scripts defined on %s." % obj.get_display_name(caller)
+                result.append("No scripts defined on %s." % obj.get_display_name(caller))
             elif not self.switches:
                 # view all scripts
                 from evennia.commands.default.system import format_script_list
-                string += format_script_list(scripts)
+                result.append(format_script_list(scripts))
             elif "start" in self.switches:
                 num = sum([obj.scripts.start(script.key) for script in scripts])
-                string += "%s scripts started on %s." % (num, obj.get_display_name(caller))
+                result.append("%s scripts started on %s." % (num, obj.get_display_name(caller)))
             elif "stop" in self.switches:
                 for script in scripts:
-                    string += "Stopping script %s on %s." % (script.get_display_name(caller),
-                                                             obj.get_display_name(caller))
+                    result.append("Stopping script %s on %s." % (script.get_display_name(caller),
+                                                                 obj.get_display_name(caller)))
                     script.stop()
-                string = string.strip()
             obj.scripts.validate()
         else: # rhs exists
             if not self.switches:
                 # adding a new script, and starting it
                 ok = obj.scripts.add(self.rhs, autostart=True)
                 if not ok:
-                    string += "\nScript %s could not be added and/or started on %s." % (
+                    result.append("\nScript %s could not be added and/or started on %s." % (
                         self.rhs, obj.get_display_name(caller)
-                    )
+                    ))
                 else:
-                    string = "Script |w%s|n successfully added and started on %s." % (
+                    result.append("Script |w%s|n successfully added and started on %s." % (
                         self.rhs, obj.get_display_name(caller)
-                    )
+                    ))
 
             else:
                 paths = [self.rhs] + ["%s.%s" % (prefix, self.rhs)
@@ -2420,20 +2418,20 @@ class CmdScript(COMMAND_DEFAULT_CLASS):
                     for path in paths:
                         ok = obj.scripts.stop(path)
                         if not ok:
-                            string += "\nScript %s could not be stopped. Does it exist?" % path
+                            result.append("\nScript %s could not be stopped. Does it exist?" % path)
                         else:
-                            string = "Script stopped and removed from object."
+                            result = ["Script stopped and removed from object."]
                             break
                 if "start" in self.switches:
                     # we are starting an already existing script
                     for path in paths:
                         ok = obj.scripts.start(path)
                         if not ok:
-                            string += "\nScript %s could not be (re)started." % path
+                            result.append("\nScript %s could not be (re)started." % path)
                         else:
-                            string = "Script started successfully."
+                            result = ["Script started successfully."]
                             break
-        caller.msg(string.strip())
+        caller.msg("".join(result).strip())
 
 
 class CmdTag(COMMAND_DEFAULT_CLASS):
@@ -2569,7 +2567,7 @@ class CmdSpawn(COMMAND_DEFAULT_CLASS):
 
     Usage:
       @spawn
-      @spawn[/switch] prototype_name
+      @spawn[/switch] <prototype_name>
       @spawn[/switch] {prototype dictionary}
 
     Switch:
