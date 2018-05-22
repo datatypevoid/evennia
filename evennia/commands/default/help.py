@@ -16,6 +16,8 @@ from evennia.utils.eveditor import EvEditor
 from evennia.utils.utils import string_suggestions, class_from_module
 
 COMMAND_DEFAULT_CLASS = class_from_module(settings.COMMAND_DEFAULT_CLASS)
+HELP_MORE = settings.HELP_MORE
+CMD_IGNORE_PREFIXES = settings.CMD_IGNORE_PREFIXES
 
 # limit symbol import for API
 __all__ = ("CmdHelp", "CmdSetHelp")
@@ -45,9 +47,9 @@ class CmdHelp(Command):
     return_cmdset = True
 
     # Help messages are wrapped in an EvMore call (unless using the webclient
-    # with separate help popups) If you want to avoid this, simply set the
-    # 'help_more' flag to False.
-    help_more = True
+    # with separate help popups) If you want to avoid this, simply add
+    # 'HELP_MORE = False' in your settings/conf/settings.py
+    help_more = HELP_MORE
 
     # suggestion cutoff, between 0 and 1 (1 => perfect match)
     suggestion_cutoff = 0.6
@@ -66,14 +68,14 @@ class CmdHelp(Command):
 
             if self.session.protocol_key in ("websocket", "ajax/comet"):
                 try:
-                    options = self.player.db._saved_webclient_options
+                    options = self.account.db._saved_webclient_options
                     if options and options["helppopup"]:
                         usemore = False
                 except KeyError:
                     pass
 
             if usemore:
-                evmore.msg(self.caller, text)
+                evmore.msg(self.caller, text, session=self.session)
                 return
 
         self.msg((text, {"type": "help"}))
@@ -134,12 +136,12 @@ class CmdHelp(Command):
         Helper method. If this return True, the given cmd
         auto-help will be viewable in the help listing.
         Override this to easily select what is shown to
-        the player. Note that only commands available
+        the account. Note that only commands available
         in the caller's merged cmdset are available.
 
         Args:
             cmd (Command): Command class from the merged cmdset
-            caller (Character, Player or Session): The current caller
+            caller (Character, Account or Session): The current caller
                 executing the help command.
 
         """
@@ -197,7 +199,8 @@ class CmdHelp(Command):
         # retrieve all available commands and database topics
         all_cmds = [cmd for cmd in cmdset if self.check_show_help(cmd, caller)]
         all_topics = [topic for topic in HelpEntry.objects.all() if topic.access(caller, 'view', default=True)]
-        all_categories = list(set([cmd.help_category.lower() for cmd in all_cmds] + [topic.help_category.lower() for topic in all_topics]))
+        all_categories = list(set([cmd.help_category.lower() for cmd in all_cmds] + [topic.help_category.lower()
+                                                                                     for topic in all_topics]))
 
         if query in ("list", "all"):
             # we want to list all available help entries, grouped by category
@@ -221,18 +224,28 @@ class CmdHelp(Command):
         if suggestion_maxnum > 0:
             vocabulary = [cmd.key for cmd in all_cmds if cmd] + [topic.key for topic in all_topics] + all_categories
             [vocabulary.extend(cmd.aliases) for cmd in all_cmds]
-            suggestions = [sugg for sugg in string_suggestions(query, set(vocabulary), cutoff=suggestion_cutoff, maxnum=suggestion_maxnum)
+            suggestions = [sugg for sugg in string_suggestions(query, set(vocabulary), cutoff=suggestion_cutoff,
+                                                               maxnum=suggestion_maxnum)
                            if sugg != query]
             if not suggestions:
                 suggestions = [sugg for sugg in vocabulary if sugg != query and sugg.startswith(query)]
 
         # try an exact command auto-help match
         match = [cmd for cmd in all_cmds if cmd == query]
+
+        if not match:
+            # try an inexact match with prefixes stripped from query and cmds
+            _query = query[1:] if query[0] in CMD_IGNORE_PREFIXES else query
+
+            match = [cmd for cmd in all_cmds
+                    for m in cmd._matchset if m == _query or
+                    m[0] in CMD_IGNORE_PREFIXES and m[1:] == _query]
+
         if len(match) == 1:
             formatted = self.format_help_entry(match[0].key,
-                     match[0].get_help(caller, cmdset),
-                     aliases=match[0].aliases,
-                     suggested=suggestions)
+                                               match[0].get_help(caller, cmdset),
+                                               aliases=match[0].aliases,
+                                               suggested=suggestions)
             self.msg_help(formatted)
             return
 
@@ -240,20 +253,21 @@ class CmdHelp(Command):
         match = list(HelpEntry.objects.find_topicmatch(query, exact=True))
         if len(match) == 1:
             formatted = self.format_help_entry(match[0].key,
-                     match[0].entrytext,
-                     aliases=match[0].aliases.all(),
-                     suggested=suggestions)
+                                               match[0].entrytext,
+                                               aliases=match[0].aliases.all(),
+                                               suggested=suggestions)
             self.msg_help(formatted)
             return
 
         # try to see if a category name was entered
         if query in all_categories:
-            self.msg_help(self.format_help_list({query:[cmd.key for cmd in all_cmds if cmd.help_category==query]},
-                                                {query:[topic.key for topic in all_topics if topic.help_category==query]}))
+            self.msg_help(self.format_help_list({query: [cmd.key for cmd in all_cmds if cmd.help_category == query]},
+                                                {query: [topic.key for topic in all_topics
+                                                         if topic.help_category == query]}))
             return
 
         # no exact matches found. Just give suggestions.
-        self.msg(self.format_help_entry("", "No help entry found for '%s'" % query, None, suggested=suggestions))
+        self.msg((self.format_help_entry("", "No help entry found for '%s'" % query, None, suggested=suggestions), {"type": "help"}))
 
 
 def _loadhelp(caller):
@@ -262,6 +276,7 @@ def _loadhelp(caller):
         return entry.entrytext
     else:
         return ""
+
 
 def _savehelp(caller, buffer):
     entry = caller.db._editing_help
@@ -273,6 +288,7 @@ def _savehelp(caller, buffer):
 def _quithelp(caller):
     caller.msg("Closing the editor.")
     del caller.db._editing_help
+
 
 class CmdSetHelp(COMMAND_DEFAULT_CLASS):
     """
@@ -300,13 +316,12 @@ class CmdSetHelp(COMMAND_DEFAULT_CLASS):
     is to let everyone read the help file.
 
     """
-    key = "@help"
-    aliases = "@sethelp"
-    locks = "cmd:perm(PlayerHelpers)"
+    key = "@sethelp"
+    locks = "cmd:perm(Helper)"
     help_category = "Building"
 
     def func(self):
-        "Implement the function"
+        """Implement the function"""
 
         switches = self.switches
         lhslist = self.lhslist
@@ -328,7 +343,7 @@ class CmdSetHelp(COMMAND_DEFAULT_CLASS):
         # check if we have an old entry with the same name
         try:
             for querystr in topicstrlist:
-                old_entry = HelpEntry.objects.find_topicmatch(querystr) # also search by alias
+                old_entry = HelpEntry.objects.find_topicmatch(querystr)  # also search by alias
                 if old_entry:
                     old_entry = list(old_entry)[0]
                     break
@@ -351,12 +366,12 @@ class CmdSetHelp(COMMAND_DEFAULT_CLASS):
             else:
                 helpentry = create.create_help_entry(topicstr,
                                                      self.rhs, category=category,
-                                                     locks=lockstring,aliases=aliases)
+                                                     locks=lockstring, aliases=aliases)
             self.caller.db._editing_help = helpentry
 
             EvEditor(self.caller, loadfunc=_loadhelp, savefunc=_savehelp,
-                    quitfunc=_quithelp, key="topic {}".format(topicstr),
-                    persistent=True)
+                     quitfunc=_quithelp, key="topic {}".format(topicstr),
+                     persistent=True)
             return
 
         if 'append' in switches or "merge" in switches or "extend" in switches:
@@ -400,21 +415,21 @@ class CmdSetHelp(COMMAND_DEFAULT_CLASS):
                 self.msg("Overwrote the old topic '%s'%s." % (topicstr, aliastxt))
             else:
                 self.msg("Topic '%s'%s already exists. Use /replace to overwrite "
-                        "or /append or /merge to add text to it." % (topicstr, aliastxt))
+                         "or /append or /merge to add text to it." % (topicstr, aliastxt))
         else:
             # no old entry. Create a new one.
             new_entry = create.create_help_entry(topicstr,
                                                  self.rhs, category=category,
-                                                 locks=lockstring,aliases=aliases)
+                                                 locks=lockstring, aliases=aliases)
             if new_entry:
                 self.msg("Topic '%s'%s was successfully created." % (topicstr, aliastxt))
                 if 'edit' in switches:
                     # open the line editor to edit the helptext
                     self.caller.db._editing_help = new_entry
                     EvEditor(self.caller, loadfunc=_loadhelp,
-                            savefunc=_savehelp, quitfunc=_quithelp,
-                            key="topic {}".format(new_entry.key),
-                            persistent=True)
+                             savefunc=_savehelp, quitfunc=_quithelp,
+                             key="topic {}".format(new_entry.key),
+                             persistent=True)
                     return
             else:
                 self.msg("Error when creating topic '%s'%s! Contact an admin." % (topicstr, aliastxt))
